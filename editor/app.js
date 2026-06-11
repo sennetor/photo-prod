@@ -588,6 +588,7 @@ const MENUS = {
     ['New…', 'Ctrl+N', () => newDocDialog()],
     ['Open…', 'Ctrl+O', () => openFile('open')],
     ['Place as Layer…', '', () => openFile('place')],
+    { submenu: 'Open Recent', recent: true },
     null,
     ['Export PNG', 'Ctrl+S', exportPNG],
   ],
@@ -643,6 +644,19 @@ function buildMenus() {
     drop.className = 'menu-drop';
     for (const entry of items) {
       if (!entry) { drop.insertAdjacentHTML('beforeend', '<hr>'); continue; }
+      if (entry.submenu) {
+        const sub = document.createElement('div');
+        sub.className = 'submenu';
+        const tog = document.createElement('button');
+        tog.innerHTML = `<span>${entry.submenu}</span><span class="shortcut">▸</span>`;
+        tog.addEventListener('click', (ev) => ev.stopPropagation());
+        const subDrop = document.createElement('div');
+        subDrop.className = 'menu-drop submenu-drop';
+        sub.append(tog, subDrop);
+        drop.appendChild(sub);
+        if (entry.recent) { recentDropEl = subDrop; renderRecentDrop(); }
+        continue;
+      }
       const [label, shortcut, fn] = entry;
       const b = document.createElement('button');
       b.innerHTML = `<span>${label}</span><span class="shortcut">${shortcut}</span>`;
@@ -828,6 +842,7 @@ function refresh() {
   ensureAnts();
   $('#status-size').textContent = `${state.doc.width} × ${state.doc.height}px`;
   $('#titlebar-doc').textContent = `${state.doc.name} @ ${Math.round(state.zoom * 100)}%`;
+  scheduleSave();
 }
 
 /* ------------------------------ pointer / tools ----------------------------- */
@@ -1229,6 +1244,7 @@ $('#file-input').addEventListener('change', (e) => {
     }
   };
   img.src = url;
+  addRecent(file);
 });
 
 /* drag & drop places as a layer */
@@ -1244,7 +1260,230 @@ viewport.addEventListener('drop', (e) => {
     placeAsLayer(img, file.name.replace(/\.[^.]+$/, ''));
   };
   img.src = url;
+  addRecent(file);
 });
+
+/* ----------------------------- recent files -------------------------------- */
+/* Browsers can't reopen a disk path, so we stash the file's bytes in IndexedDB
+   (large quota, unlike localStorage) and reopen from the stored Blob. */
+
+const RECENT_STORE = 'recent';
+const SESSION_STORE = 'session';
+const RECENT_MAX = 10;
+let recentCache = [];
+let recentDropEl = null;
+
+function openDB() {
+  return new Promise((res, rej) => {
+    const req = indexedDB.open('photoprod', 2);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(RECENT_STORE)) {
+        db.createObjectStore(RECENT_STORE, { keyPath: 'id' });
+      }
+      if (!db.objectStoreNames.contains(SESSION_STORE)) {
+        db.createObjectStore(SESSION_STORE);   // keyed by an explicit string ('current')
+      }
+    };
+    req.onsuccess = () => res(req.result);
+    req.onerror = () => rej(req.error);
+  });
+}
+
+async function loadRecents() {
+  try {
+    const db = await openDB();
+    recentCache = await new Promise((res, rej) => {
+      const req = db.transaction(RECENT_STORE).objectStore(RECENT_STORE).getAll();
+      req.onsuccess = () => res(req.result || []);
+      req.onerror = () => rej(req.error);
+    });
+    recentCache.sort((a, b) => b.ts - a.ts);
+    recentCache = recentCache.slice(0, RECENT_MAX);
+  } catch { recentCache = []; }
+  renderRecentDrop();
+}
+
+async function addRecent(file) {
+  if (!file || !file.type || !file.type.startsWith('image/')) return;
+  const id = `${file.name} ${file.size}`;
+  const rec = { id, name: file.name, blob: file, ts: Date.now() };
+  recentCache = [rec, ...recentCache.filter((r) => r.id !== id)].slice(0, RECENT_MAX);
+  renderRecentDrop();
+  try {
+    const db = await openDB();
+    await new Promise((res, rej) => {
+      const tx = db.transaction(RECENT_STORE, 'readwrite');
+      const store = tx.objectStore(RECENT_STORE);
+      store.put(rec);
+      const keep = new Set(recentCache.map((r) => r.id));
+      const all = store.getAll();           // prune anything beyond the cap
+      all.onsuccess = () => { for (const r of all.result) if (!keep.has(r.id)) store.delete(r.id); };
+      tx.oncomplete = () => res();
+      tx.onerror = () => rej(tx.error);
+    });
+  } catch { /* private mode / quota — list still works for this session */ }
+}
+
+async function clearRecents() {
+  recentCache = [];
+  renderRecentDrop();
+  try {
+    const db = await openDB();
+    await new Promise((res, rej) => {
+      const tx = db.transaction(RECENT_STORE, 'readwrite');
+      tx.objectStore(RECENT_STORE).clear();
+      tx.oncomplete = () => res();
+      tx.onerror = () => rej(tx.error);
+    });
+  } catch { /* ignore */ }
+}
+
+function openRecent(rec) {
+  const url = URL.createObjectURL(rec.blob);
+  const img = new Image();
+  img.onload = () => {
+    URL.revokeObjectURL(url);
+    loadAsDocument(img, rec.name.replace(/\.[^.]+$/, ''));
+    addRecent(rec.blob);     // bump to top of the recent list
+    refresh();
+  };
+  img.onerror = () => { URL.revokeObjectURL(url); };
+  img.src = url;
+}
+
+function renderRecentDrop() {
+  const el = recentDropEl;
+  if (!el) return;
+  el.textContent = '';
+  if (!recentCache.length) {
+    const empty = document.createElement('button');
+    empty.className = 'menu-empty';
+    empty.disabled = true;
+    empty.innerHTML = '<span>No recent files</span>';
+    el.appendChild(empty);
+    return;
+  }
+  for (const rec of recentCache) {
+    const b = document.createElement('button');
+    const nm = document.createElement('span');
+    nm.className = 'recent-name';
+    nm.textContent = rec.name;
+    b.appendChild(nm);
+    b.title = rec.name;
+    b.addEventListener('click', () => { closeMenus(); openRecent(rec); });
+    el.appendChild(b);
+  }
+  el.insertAdjacentHTML('beforeend', '<hr>');
+  const clr = document.createElement('button');
+  clr.innerHTML = '<span>Clear Recent</span>';
+  clr.addEventListener('click', () => { closeMenus(); clearRecents(); });
+  el.appendChild(clr);
+}
+
+/* ---------------------------- session autosave ----------------------------- */
+/* The canvas lives only in memory, so a refresh would otherwise wipe everything.
+   We debounce-save a snapshot of every layer (PNG blob + metadata) to IndexedDB
+   and restore it on load, so an accidental refresh or crash keeps your work. */
+
+let saveTimer = null;
+let restoring = false;   // suppress autosave while we're rebuilding from a snapshot
+
+function blobToImage(blob) {
+  return new Promise((res, rej) => {
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload = () => { URL.revokeObjectURL(url); res(img); };
+    img.onerror = (e) => { URL.revokeObjectURL(url); rej(e); };
+    img.src = url;
+  });
+}
+
+function scheduleSave() {
+  if (restoring) return;
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(saveSession, 1200);   // collapse bursts of edits into one write
+}
+
+let toastTimer = null;
+function toast(msg) {
+  let el = $('#toast');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'toast';
+    document.body.appendChild(el);
+  }
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 3200);
+}
+
+async function snapshotSession() {
+  const layers = [];
+  for (const l of state.layers) {
+    const blob = await new Promise((r) => l.canvas.toBlob(r, 'image/png'));
+    if (!blob) continue;
+    layers.push({
+      name: l.name, x: l.x, y: l.y, visible: l.visible,
+      opacity: l.opacity, blend: l.blend, edgeFeather: l.edgeFeather, blob,
+    });
+  }
+  return { doc: { ...state.doc }, active: state.active, layers, ts: Date.now() };
+}
+
+async function saveSession() {
+  if (restoring || !state.layers.length) return;
+  try {
+    const snap = await snapshotSession();
+    if (!snap.layers.length) return;
+    const db = await openDB();
+    await new Promise((res, rej) => {
+      const tx = db.transaction(SESSION_STORE, 'readwrite');
+      tx.objectStore(SESSION_STORE).put(snap, 'current');
+      tx.oncomplete = () => res();
+      tx.onerror = () => rej(tx.error);
+    });
+  } catch { /* quota / private mode — nothing we can do, in-memory work is unaffected */ }
+}
+
+async function restoreSession() {
+  let snap;
+  try {
+    const db = await openDB();
+    snap = await new Promise((res) => {
+      const req = db.transaction(SESSION_STORE).objectStore(SESSION_STORE).get('current');
+      req.onsuccess = () => res(req.result);
+      req.onerror = () => res(null);
+    });
+  } catch { return false; }
+  if (!snap || !snap.layers || !snap.layers.length) return false;
+  restoring = true;
+  try {
+    state.doc = { ...snap.doc };
+    state.selection = null;
+    resetAdjustments();
+    const layers = [];
+    for (const ls of snap.layers) {
+      const layer = makeLayer(ls.name, {
+        x: ls.x, y: ls.y, visible: ls.visible,
+        opacity: ls.opacity, blend: ls.blend, edgeFeather: ls.edgeFeather,
+      });
+      try { layer.ctx.drawImage(await blobToImage(ls.blob), 0, 0); } catch { /* skip bad layer */ }
+      layers.push(layer);
+    }
+    state.layers = layers;
+    state.active = Math.min(Math.max(0, snap.active | 0), layers.length - 1);
+    state.history.length = 0;
+    state.future.length = 0;
+    resizeDocCanvas();
+    fitToView();
+    refresh();
+  } finally {
+    restoring = false;
+  }
+  return true;
+}
 
 function loadAsDocument(img, name) {
   pushHistory();
@@ -1876,6 +2115,7 @@ function setupPanels() {
 
 function init() {
   buildMenus();
+  loadRecents();
   buildToolbar();
   buildAdjustPanel();
   buildLayersPanel();
@@ -1923,13 +2163,24 @@ function init() {
     e.stopPropagation();   // don't trigger tool shortcuts while typing
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); generativeFill(); }
   });
-  createDocument('Untitled', 1280, 800, 'transparent');
-  demoContent();
-  state.history.length = 0;
   setTool('brush');
-  fitToView();
-  refresh();
   window.addEventListener('resize', () => applyStageTransform());
+
+  // Restore the previous session if one was autosaved; otherwise show the demo.
+  restoreSession().then((restored) => {
+    if (restored) {
+      toast('Restored your previous session.');
+    } else {
+      createDocument('Untitled', 1280, 800, 'transparent');
+      demoContent();
+      state.history.length = 0;
+      fitToView();
+      refresh();
+    }
+  });
+
+  // Flush a final save when the tab closes so the latest edit is never lost.
+  window.addEventListener('beforeunload', () => { clearTimeout(saveTimer); saveSession(); });
 }
 
 init();

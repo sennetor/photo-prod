@@ -71,6 +71,33 @@ body {
 .menu-drop button:hover .shortcut { color: rgba(255,255,255,.7); }
 .menu-drop .shortcut { color: var(--text-dim); }
 .menu-drop hr { border: 0; border-top: 1px solid var(--border); margin: 4px 6px; }
+/* nested submenu (Open Recent) */
+.menu-drop .submenu { position: relative; }
+.submenu-drop {
+  position: absolute; top: -5px; left: 100%; margin-left: 2px;
+  max-height: 60vh; overflow-y: auto;
+}
+/* the ancestor `.menu-item.open .menu-drop` rule would otherwise force this open */
+.menu-item.open .submenu-drop { display: none; }
+.menu-drop .submenu:hover > .submenu-drop { display: block; }
+.menu-drop .submenu:hover > button { background: var(--accent); color: #fff; }
+.menu-drop .submenu:hover > button .shortcut { color: rgba(255,255,255,.7); }
+.menu-drop .recent-name {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px;
+}
+.menu-drop .menu-empty, .menu-drop .menu-empty:hover {
+  background: none; color: var(--text-dim); cursor: default;
+}
+/* transient toast (session restore, etc.) */
+#toast {
+  position: fixed; left: 50%; bottom: 38px; transform: translate(-50%, 12px);
+  background: var(--bg-3); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 9px 16px; box-shadow: 0 8px 24px rgba(0,0,0,.5);
+  font-size: 12px; z-index: 500; pointer-events: none;
+  opacity: 0; transition: opacity .2s ease, transform .2s ease;
+}
+#toast.show { opacity: 1; transform: translate(-50%, 0); }
 #titlebar-doc { margin-left: auto; color: var(--text-dim); padding-right: 8px; }
 
 /* ---------- options bar ---------- */
