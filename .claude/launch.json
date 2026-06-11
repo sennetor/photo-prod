@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "editor",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["--yes", "http-server", "editor", "-p", "4173", "-c-1"],
+      "port": 4173
+    }
+  ]
+}

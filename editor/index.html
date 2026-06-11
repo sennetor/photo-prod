@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Photo Prod</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <header id="menubar">
+    <div id="logo" title="Photo Prod">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <circle cx="12" cy="12" r="8.5" stroke="white" stroke-width="1.7"/>
+        <circle cx="12" cy="12" r="3.8" stroke="white" stroke-width="1.7"/>
+        <circle cx="9.2" cy="9.2" r="1.1" fill="white"/>
+      </svg>
+    </div>
+    <nav id="menus"></nav>
+    <div id="titlebar-doc"></div>
+  </header>
+
+  <div id="optionsbar"></div>
+
+  <div id="main">
+    <div id="toolbar"></div>
+
+    <div id="viewport">
+      <div id="stage">
+        <canvas id="doc"></canvas>
+        <canvas id="overlay"></canvas>
+      </div>
+    </div>
+
+    <div id="panel-resizer" title="Drag to resize panel"></div>
+    <aside id="panels">
+      <section class="panel" id="select-panel">
+        <h3>Select Subject</h3>
+        <div class="panel-body">
+          <div id="select-row">
+            <input id="sel-text" type="text" placeholder="e.g. the dog, sky, red car…">
+            <button id="sel-go" class="primary">Select</button>
+          </div>
+          <div class="adj-row" title="Grow the selection outward (won't eat into the object)">
+            <label>Expand</label>
+            <input type="range" id="sel-expand" min="0" max="48" value="0">
+            <span class="adj-val" id="sel-expand-val">0px</span>
+          </div>
+          <div class="adj-row" title="Soft edge, outward only — never erodes back into the object">
+            <label>Feather</label>
+            <input type="range" id="sel-feather" min="0" max="40" value="0">
+            <span class="adj-val" id="sel-feather-val">0px</span>
+          </div>
+          <div class="adj-actions">
+            <button id="sel-invert">Invert</button>
+            <button id="sel-all">All</button>
+            <button id="sel-none">None</button>
+          </div>
+          <div id="sel-status">Describe what to select — or click objects with W.</div>
+        </div>
+      </section>
+      <section class="panel" id="gen-panel">
+        <h3>Generative Fill</h3>
+        <div class="panel-body">
+          <textarea id="gen-prompt" rows="2" placeholder="Describe what to generate in the selection…"></textarea>
+          <div class="adj-actions">
+            <button id="gen-go" class="primary">Generate</button>
+          </div>
+          <div id="gen-expand-tip" hidden>
+            <span>Tight selections can leave a faint edge seam. Expanding ~5px first usually fixes it.</span>
+            <div class="tip-actions">
+              <button id="gen-expand-apply" class="primary">Expand 5px &amp; Generate</button>
+              <button id="gen-expand-skip">Generate anyway</button>
+            </div>
+          </div>
+          <div id="gen-status">Make a selection, then describe the fill.</div>
+        </div>
+      </section>
+      <section class="panel" id="reimagine-panel">
+        <h3>Reimagine</h3>
+        <div class="panel-body">
+          <textarea id="rmg-prompt" rows="2" placeholder="Describe a variation of the whole image…"></textarea>
+          <div class="adj-row">
+            <label>Likeness</label>
+            <input type="range" id="rmg-likeness" min="0" max="100" value="55">
+            <span class="adj-val" id="rmg-likeness-val">55</span>
+          </div>
+          <div class="adj-actions">
+            <button id="rmg-go" class="primary">Generate 3</button>
+          </div>
+          <div id="rmg-status">Riff on the whole image for inspiration.</div>
+        </div>
+      </section>
+      <section class="panel" id="adjust-panel">
+        <h3>Adjustments</h3>
+        <div class="panel-body" id="adjust-body"></div>
+      </section>
+      <section class="panel" id="layers-panel">
+        <h3>Layers</h3>
+        <div class="panel-body">
+          <div id="layer-controls">
+            <select id="blend-select" title="Blend mode"></select>
+            <label class="opacity-ctl" id="opacity-ctl">Opacity
+              <input type="range" id="layer-opacity" min="0" max="100" value="100">
+              <span id="layer-opacity-val">100%</span>
+            </label>
+          </div>
+          <label class="opacity-ctl" id="edge-ctl" title="Soften this layer's edge to blend the seam">Edge
+            <input type="range" id="layer-edge" min="0" max="30" value="0">
+            <span id="layer-edge-val">0px</span>
+          </label>
+          <div id="layer-variations" hidden title="This layer holds AI variations — switch between them anytime">
+            <span class="vary-label">Variation</span>
+            <button id="vary-prev" title="Previous variation">‹</button>
+            <span id="vary-counter">1 / 3</span>
+            <button id="vary-next" title="Next variation">›</button>
+          </div>
+          <div id="layer-list"></div>
+          <div id="layer-buttons">
+            <button id="layer-add" title="New layer">+</button>
+            <button id="layer-dup" title="Duplicate layer">⧉</button>
+            <button id="layer-up" title="Move up">↑</button>
+            <button id="layer-down" title="Move down">↓</button>
+            <button id="layer-del" title="Delete layer">🗑</button>
+          </div>
+        </div>
+      </section>
+    </aside>
+  </div>
+
+  <footer id="statusbar">
+    <span id="status-zoom">100%</span>
+    <span id="status-size"></span>
+    <span id="status-pos"></span>
+    <span id="status-tool"></span>
+  </footer>
+</div>
+
+<div id="modal-root" hidden></div>
+<input type="file" id="file-input" hidden accept="image/*">
+<script src="app.js"></script>
+</body>
+</html>

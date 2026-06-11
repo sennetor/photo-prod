@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+sam-env/
+env/
+
+# Models & weights (download on first run — never commit)
+models/
+*.pt
+*.pth
+*.safetensors
+*.ckpt
+*.gguf
+
+# Generated / test images and personal photos — keep out of the repo
+*.png
+*.jpg
+*.jpeg
+*.webp
+!photoprod.ico
+
+# Third-party clones
+Graphite/
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+desktop.ini
+*.log
