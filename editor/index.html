@@ -60,12 +60,25 @@
         </div>
       </section>
       <section class="panel" id="gen-panel">
-        <h3>Generative Fill</h3>
+        <h3>Generative AI</h3>
         <div class="panel-body">
+          <div id="gen-model" class="model-badge" title="Generative model" data-state="loading">
+            <span class="dot"></span><span class="model-text">Checking model…</span>
+          </div>
+          <div id="gen-mode" class="seg-toggle">
+            <button id="mode-fill" class="active" title="Inpaint the current selection">Fill</button>
+            <button id="mode-rmg" title="Riff on the whole image for inspiration">Reimagine</button>
+          </div>
           <textarea id="gen-prompt" rows="2" placeholder="Describe what to generate in the selection…"></textarea>
+          <div class="adj-row" id="rmg-likeness-row" hidden>
+            <label>Likeness</label>
+            <input type="range" id="rmg-likeness" min="0" max="100" value="55">
+            <span class="adj-val" id="rmg-likeness-val">55</span>
+          </div>
           <div class="adj-actions">
             <button id="gen-go" class="primary">Generate</button>
           </div>
+          <div id="gen-progress" hidden><div class="bar"></div></div>
           <div id="gen-expand-tip" hidden>
             <span>Tight selections can leave a faint edge seam. Expanding ~5px first usually fixes it.</span>
             <div class="tip-actions">
@@ -74,21 +87,6 @@
             </div>
           </div>
           <div id="gen-status">Make a selection, then describe the fill.</div>
-        </div>
-      </section>
-      <section class="panel" id="reimagine-panel">
-        <h3>Reimagine</h3>
-        <div class="panel-body">
-          <textarea id="rmg-prompt" rows="2" placeholder="Describe a variation of the whole image…"></textarea>
-          <div class="adj-row">
-            <label>Likeness</label>
-            <input type="range" id="rmg-likeness" min="0" max="100" value="55">
-            <span class="adj-val" id="rmg-likeness-val">55</span>
-          </div>
-          <div class="adj-actions">
-            <button id="rmg-go" class="primary">Generate 3</button>
-          </div>
-          <div id="rmg-status">Riff on the whole image for inspiration.</div>
         </div>
       </section>
       <section class="panel" id="adjust-panel">

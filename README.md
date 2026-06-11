@@ -13,6 +13,8 @@ A from-scratch, browser-based photo editor with a modern Photoshop-style dark UI
 - Adjustments (brightness/contrast/saturation/hue/blur) with live preview + bake; one-click filters
 - Copy / cut / paste / "layer via copy", crop-to-selection, expand-canvas (outpainting), PNG export
 - Undo/redo, collapsible + resizable panels
+- **Recent files** (File → Open Recent) and **automatic session restore** — an accidental refresh or crash doesn't lose your work (layers snapshot to IndexedDB)
+- **Model switcher in the UI** — the Generative AI panel shows the active model (with its license) and switches backends at runtime, with a live progress bar (load / denoise steps / blend) during generation
 
 **AI service (`genai-service/server.py`)** — FastAPI, picks the largest CUDA device automatically:
 - **Generative fill** — full-image latent inpainting (no pixel paste-back seam), restoring untouched pixels at full resolution, then **Poisson seamless-clone** stitching (OpenCV `cv2.seamlessClone`, the gradient-domain technique behind Photoshop's Healing Brush) with a bled-out mask so seams vanish. Returns a batch of variations to cycle through.
@@ -47,18 +49,27 @@ On Windows, `launch.cmd` starts both and opens the editor.
 
 ## Model backends
 
-`PHOTOPROD_MODEL` selects the inpaint model. The default is **`klein`** (Apache-2.0) so a fresh checkout is commercial-safe out of the box.
+`PHOTOPROD_MODEL` sets the startup model; you can also switch at runtime from the editor (click the model badge in the Generative AI panel). The default is **`klein`** (Apache-2.0) so a fresh checkout is commercial-safe out of the box.
 
-| value       | model                       | license            |
-|-------------|-----------------------------|--------------------|
-| `klein` *(default)* | black-forest-labs/FLUX.2-klein-4B | Apache 2.0, ungated |
-| `flux-fill` | black-forest-labs/FLUX.1-Fill-dev | gated, **NON-COMMERCIAL** |
-| `chroma`    | lodestones/Chroma1-HD       | Apache 2.0, ungated |
-| `qwen`      | Qwen/Qwen-Image             | Apache 2.0, ungated |
+| value       | model                       | license            | notes |
+|-------------|-----------------------------|--------------------|-------|
+| `klein` *(default)* | black-forest-labs/FLUX.2-klein-4B | Apache 2.0, ungated | |
+| `flux-fill` | black-forest-labs/FLUX.1-Fill-dev | gated, **NON-COMMERCIAL** | purpose-built fill |
+| `chroma`    | lodestones/Chroma1-HD       | Apache 2.0, ungated | uncensored |
+| `qwen`      | Qwen/Qwen-Image             | Apache 2.0, ungated | 20B — large |
+| `juggernaut` | RunDiffusion/Juggernaut-XI-v11 | **CC-BY-NC-ND (non-commercial)** | SDXL |
+| `juggernaut-cn` | Juggernaut XI + xinsir ControlNet-Union ProMax | **non-commercial** (base model) | SDXL + real inpaint conditioning — strong seams |
+| `z-image`   | Tongyi-MAI/Z-Image-Turbo    | Apache 2.0, ungated | txt2img only: generates from the prompt and seam-stitches into the selection (no scene awareness) |
 
-> ⚠️ **`flux-fill` gives the best blending but is non-commercial and gated.** Opt in with `PHOTOPROD_MODEL=flux-fill` only if you've accepted its license on Hugging Face and your use is non-commercial.
+> ⚠️ **`flux-fill` and the two `juggernaut*` backends are non-commercial.** Opt in only if you've accepted the licenses (flux-fill is also gated on Hugging Face) and your use is personal/non-commercial.
 
-Reimagine uses Chroma (Apache 2.0). Select Subject uses `facebook/sam3` (gated, review its license) and `facebook/sam2.1-hiera-large` (Apache 2.0).
+Reimagine follows the selected backend when it has an img2img variant (chroma, qwen, juggernaut, juggernaut-cn, z-image) and falls back to Chroma otherwise. Select Subject uses `facebook/sam3` (gated, review its license) and `facebook/sam2.1-hiera-large` (Apache 2.0).
+
+Weights download on first use into the Hugging Face cache (the UI marks not-yet-downloaded models with ⬇ — some are tens of GB). Heavy components stream from disk straight to GPU memory, so even 20B models load on machines with modest system RAM. To pre-download and verify every backend end-to-end, run the staging tool while the service is up:
+
+```bash
+sam-env\Scripts\python genai-service\stage.py    # exit 0 = every backend verified
+```
 
 `PHOTOPROD_STITCH` = `poisson` (default) or `feather`. `PHOTOPROD_HOST` defaults to `0.0.0.0` (LAN-accessible).
 

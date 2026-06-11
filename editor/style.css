@@ -88,6 +88,76 @@ body {
 .menu-drop .menu-empty, .menu-drop .menu-empty:hover {
   background: none; color: var(--text-dim); cursor: default;
 }
+/* generative-fill model badge */
+.model-badge {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11px; color: var(--text-dim);
+  margin-bottom: 8px; cursor: pointer; user-select: none;
+}
+.model-badge .dot {
+  width: 7px; height: 7px; border-radius: 50%; flex: none;
+  background: var(--text-dim);
+}
+.model-badge .model-text {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.model-badge[data-state="ok"] { color: var(--text); }
+.model-badge[data-state="ok"] .dot { background: #3ec46d; }
+.model-badge[data-state="noncommercial"] { color: var(--text); }
+.model-badge[data-state="noncommercial"] .dot { background: #e0a83b; }
+.model-badge[data-state="off"] .dot { background: #e5533c; }
+.model-badge { position: relative; }
+#model-menu {
+  position: absolute; top: 100%; left: 0; right: 0; z-index: 120;
+  margin-top: 4px; padding: 4px;
+  background: var(--bg-2); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: 0 8px 24px rgba(0,0,0,.5);
+}
+#model-menu button {
+  display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  width: 100%; text-align: left;
+  background: none; border: 0; color: var(--text);
+  font: inherit; font-size: 11px; padding: 6px 8px; border-radius: 4px; cursor: default;
+}
+#model-menu button:hover:not(:disabled) { background: var(--accent); color: #fff; }
+#model-menu button:hover:not(:disabled) .mm-lic { color: rgba(255,255,255,.7); }
+#model-menu button.current::before { content: '✓ '; color: #3ec46d; }
+#model-menu button:disabled { color: var(--text-dim); opacity: .55; }
+#model-menu .mm-lic { color: var(--text-dim); white-space: nowrap; }
+#model-menu .mm-name small { color: var(--text-dim); }
+
+/* Fill | Reimagine segmented toggle */
+.seg-toggle {
+  display: flex; gap: 2px; margin-bottom: 8px;
+  background: var(--bg-3); border-radius: var(--radius); padding: 2px;
+}
+.seg-toggle button {
+  flex: 1; background: none; border: 0; color: var(--text-dim);
+  font: inherit; font-size: 11px; padding: 5px 0; border-radius: 4px; cursor: default;
+}
+.seg-toggle button:hover { color: var(--text); }
+.seg-toggle button.active { background: var(--bg-1); color: var(--text); }
+/* .adj-row is display:grid, which would override the hidden attribute */
+#rmg-likeness-row[hidden] { display: none; }
+
+/* generation progress bar */
+#gen-progress {
+  height: 4px; margin: 8px 0 2px; border-radius: 2px;
+  background: var(--bg-3); overflow: hidden; position: relative;
+}
+#gen-progress[hidden] { display: none; }
+#gen-progress .bar {
+  height: 100%; width: 0%; border-radius: 2px;
+  background: var(--accent); transition: width .4s ease;
+}
+#gen-progress.indeterminate .bar {
+  position: absolute; animation: gen-sweep 1.2s ease-in-out infinite;
+}
+@keyframes gen-sweep {
+  0%   { left: -40%; }
+  100% { left: 100%; }
+}
+
 /* transient toast (session restore, etc.) */
 #toast {
   position: fixed; left: 50%; bottom: 38px; transform: translate(-50%, 12px);

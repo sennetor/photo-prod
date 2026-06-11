@@ -1670,6 +1670,105 @@ function layerViaCopy() {
 // hostname the page was loaded from (works for localhost and LAN access alike)
 const GEN_SERVICE = `http://${location.hostname}:8765`;
 
+// Friendly labels for the backends the service can run (mirrors MODELS in server.py).
+const MODEL_INFO = {
+  'flux-fill': { name: 'FLUX.1 Fill', license: 'non-commercial' },
+  'klein':     { name: 'FLUX.2 Klein 4B', license: 'Apache-2.0' },
+  'chroma':    { name: 'Chroma1-HD', license: 'Apache-2.0' },
+  'qwen':      { name: 'Qwen-Image', license: 'Apache-2.0' },
+  'juggernaut': { name: 'Juggernaut XI (SDXL)', license: 'non-commercial' },
+  'juggernaut-cn': { name: 'Juggernaut + ControlNet inpaint', license: 'non-commercial' },
+  'z-image':   { name: 'Z-Image Turbo', license: 'Apache-2.0' },
+  'z-image-edit': { name: 'Z-Image Edit', license: 'Apache-2.0' },
+  'ideogram':  { name: 'Ideogram 4.0', license: 'non-commercial' },
+};
+
+// Show which generative-fill model the service is running, fetched from /health.
+async function showModelBadge() {
+  const el = $('#gen-model');
+  if (!el) return;
+  const text = el.querySelector('.model-text');
+  try {
+    const h = await fetch(`${GEN_SERVICE}/health`).then((r) => r.json());
+    // in Reimagine mode, show the model reimagine actually runs on (it follows
+    // the selected backend when that backend has an img2img variant)
+    const rmg = genMode === 'rmg';
+    const key = rmg ? (h.reimagine_backend || 'chroma') : h.backend;
+    const info = MODEL_INFO[key] || { name: key || 'unknown', license: '' };
+    text.textContent = info.license ? `${info.name} · ${info.license}` : info.name;
+    el.dataset.state = info.license === 'non-commercial' ? 'noncommercial' : 'ok';
+    const gpu = (h.gpus || []).find((g) => `cuda:${g.index}` === h.device) || (h.gpus || [])[0];
+    el.title = `${rmg ? `Reimagine runs on: ${h.img2img}` : `Model: ${h.model}`}` +
+      `\nBackend key: ${h.backend}` +
+      `\nDevice: ${h.device || '—'}${h.loaded ? '' : ' (loads on first Generate)'}` +
+      (gpu ? `\nVRAM: ${gpu.ours_gb} GB held · ${gpu.free_gb}/${gpu.total_gb} GB free (${gpu.name})` : '') +
+      `\n\nClick to switch models.`;
+  } catch {
+    text.textContent = 'AI service offline';
+    el.dataset.state = 'off';
+    el.title = 'Start the GenAI service (launch.cmd) to enable Generative Fill.\nClick to re-check.';
+  }
+}
+
+/* dropdown to switch the service's fill model at runtime */
+function closeModelMenu() {
+  const m = $('#model-menu');
+  if (m) m.remove();
+  document.removeEventListener('click', closeModelMenu);
+}
+
+async function switchModel(key, cached = true) {
+  const text = $('#gen-model').querySelector('.model-text');
+  text.textContent = 'Switching…';
+  try {
+    const r = await fetch(`${GEN_SERVICE}/model`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ backend: key }),
+    });
+    if (!r.ok) throw new Error(await r.text());
+    await showModelBadge();
+    const info = MODEL_INFO[key] || { name: key };
+    toast(cached
+      ? `Switched to ${info.name} — it loads on your next Generate.`
+      : `Switched to ${info.name} — not downloaded yet, so your first Generate will fetch the weights (can be tens of GB).`);
+  } catch {
+    await showModelBadge();
+    toast('Could not switch model.');
+  }
+}
+
+async function toggleModelMenu(e) {
+  e.stopPropagation();
+  if ($('#model-menu')) { closeModelMenu(); return; }
+  let data;
+  try {
+    data = await fetch(`${GEN_SERVICE}/models`).then((r) => r.json());
+  } catch {
+    showModelBadge();   // service offline — just re-check the badge
+    return;
+  }
+  const menu = document.createElement('div');
+  menu.id = 'model-menu';
+  menu.addEventListener('click', (ev) => ev.stopPropagation());
+  for (const m of data.models) {
+    const info = MODEL_INFO[m.key] || { name: m.key, license: '' };
+    const b = document.createElement('button');
+    if (m.key === data.current) b.classList.add('current');
+    if (!m.available) { b.disabled = true; b.title = 'Pipeline missing from the installed diffusers build'; }
+    const note = genMode === 'rmg'
+      ? (m.reimagine === 'chroma' ? ' <small>→ Chroma</small>' : '')   // falls back
+      : (m.txt2img ? ' <small>(txt2img)</small>' : '');
+    const dl = m.cached === false ? ' <small title="Will download on first Generate">⬇</small>' : '';
+    b.innerHTML = `<span class="mm-name">${info.name}${note}${dl}</span>` +
+      `<span class="mm-lic">${info.license || ''}</span>`;
+    b.addEventListener('click', () => { closeModelMenu(); if (m.key !== data.current) switchModel(m.key, m.cached !== false); });
+    menu.appendChild(b);
+  }
+  $('#gen-model').appendChild(menu);
+  document.addEventListener('click', closeModelMenu);
+}
+
 function compositeClean() {
   // full composite without the live adjustment preview filter
   const c = document.createElement('canvas');
@@ -1706,6 +1805,57 @@ function genStatus(msg, cls = '') {
   const el = $('#gen-status');
   el.textContent = msg;
   el.className = cls;
+}
+
+/* live progress: poll the service's /progress while a generation runs */
+let progressTimer = null;
+
+function setProgressBar(pct, indeterminate) {
+  const box = $('#gen-progress');
+  box.hidden = false;
+  const bar = box.querySelector('.bar');
+  box.classList.toggle('indeterminate', !!indeterminate);
+  bar.style.width = indeterminate ? '40%' : `${pct}%`;
+}
+
+function startProgress() {
+  setProgressBar(0, true);
+  progressTimer = setInterval(async () => {
+    try {
+      const p = await fetch(`${GEN_SERVICE}/progress`).then((r) => r.json());
+      if (p.phase === 'loading') {
+        genStatus(p.cached === false
+          ? `Downloading ${p.model} — first use can be tens of GB, watch the service window…`
+          : `Loading ${p.model} onto the GPU…`, 'busy');
+        setProgressBar(0, true);
+      } else if (p.phase === 'denoising' && p.total) {
+        genStatus(`Generating — step ${p.step}/${p.total}`, 'busy');
+        setProgressBar(Math.round(100 * p.step / p.total), false);
+      } else if (p.phase === 'stitching') {
+        genStatus('Blending the result into the photo…', 'busy');
+        setProgressBar(100, false);
+      }
+    } catch { /* transient poll failure — keep the last state */ }
+  }, 700);
+}
+
+function stopProgress() {
+  clearInterval(progressTimer);
+  progressTimer = null;
+  $('#gen-progress').hidden = true;
+}
+
+// Distinguish "service is down" from "the request failed server-side" — a
+// crashed model load also drops the connection, which is not the same thing.
+async function genFailureMessage(err) {
+  try {
+    await fetch(`${GEN_SERVICE}/health`, { signal: AbortSignal.timeout(3000) });
+    return err.message.includes('fetch')
+      ? 'The request failed mid-generation (the service is still up) — likely the model crashed while loading. Check the service window for the traceback.'
+      : `Error: ${err.message}`;
+  } catch {
+    return 'Service not running — start genai-service/server.py first.';
+  }
 }
 
 // After a fill, glow the seam-refinement controls so users discover them.
@@ -1756,7 +1906,8 @@ async function generativeFill() {
     const health = await fetch(`${GEN_SERVICE}/health`).then((r) => r.json());
     genStatus(health.loaded
       ? 'Generating…'
-      : 'Loading FLUX.1 Fill onto the GPU — first run takes a few minutes…', 'busy');
+      : 'Loading the model onto the GPU — first run can take a few minutes…', 'busy');
+    startProgress();
 
     const t0 = performance.now();
     const res = await fetch(`${GEN_SERVICE}/generate`, {
@@ -1817,34 +1968,53 @@ async function generativeFill() {
       : `Done in ${((performance.now() - t0) / 1000).toFixed(1)}s — tweak Edge / Opacity to refine the seam ↓`);
     pulseRefineControls();
   } catch (err) {
-    genStatus(
-      err.message.includes('fetch')
-        ? 'Service not running — start genai-service/server.py first.'
-        : `Error: ${err.message}`, 'error');
+    genStatus(await genFailureMessage(err), 'error');
   } finally {
+    stopProgress();
     btn.disabled = false;
   }
 }
 
 /* -------------------------------- reimagine -------------------------------- */
 
-function rmgStatus(msg, cls = '') {
-  const el = $('#rmg-status');
-  el.textContent = msg;
-  el.className = cls;
+/* Fill / Reimagine mode for the combined Generative AI panel */
+let genMode = localStorage.getItem('pp-gen-mode') || 'fill';
+
+function setGenMode(mode) {
+  genMode = mode;
+  localStorage.setItem('pp-gen-mode', mode);
+  const fill = mode === 'fill';
+  $('#mode-fill').classList.toggle('active', fill);
+  $('#mode-rmg').classList.toggle('active', !fill);
+  $('#gen-prompt').placeholder = fill
+    ? 'Describe what to generate in the selection…'
+    : 'Describe a variation of the whole image…';
+  $('#rmg-likeness-row').hidden = fill;
+  $('#gen-go').textContent = fill ? 'Generate' : 'Generate 3';
+  if (fill) hideExpandTip();
+  genStatus(fill
+    ? 'Make a selection, then describe the fill.'
+    : 'Riff on the whole image for inspiration.');
+  showModelBadge();   // reimagine may run on a different model than fill
+}
+
+function dispatchGenerate() {
+  if (genMode === 'fill') generativeFill();
+  else reimagine();
 }
 
 async function reimagine() {
-  const prompt = $('#rmg-prompt').value.trim();
-  if (!prompt) { rmgStatus('Describe a variation first.', 'error'); return; }
-  const btn = $('#rmg-go');
+  const prompt = $('#gen-prompt').value.trim();
+  if (!prompt) { genStatus('Describe a variation first.', 'error'); return; }
+  const btn = $('#gen-go');
   btn.disabled = true;
   try {
-    rmgStatus('Checking service…', 'busy');
+    genStatus('Checking service…', 'busy');
     const health = await fetch(`${GEN_SERVICE}/health`).then((r) => r.json());
-    rmgStatus(health.img2img_loaded === false || !health.img2img_loaded
+    genStatus(health.img2img_loaded === false || !health.img2img_loaded
       ? 'Loading the variation model onto the GPU (first run)…'
       : 'Imagining 3 variations…', 'busy');
+    startProgress();
 
     const t0 = performance.now();
     const res = await fetch(`${GEN_SERVICE}/reimagine`, {
@@ -1877,13 +2047,11 @@ async function reimagine() {
     state.layers.splice(state.active + 1, 0, layer);
     state.active += 1;
     refresh();
-    rmgStatus(`${imgs.length} variations in ${((performance.now() - t0) / 1000).toFixed(1)}s — cycle them with ‹ › in Layers.`);
+    genStatus(`${imgs.length} variations in ${((performance.now() - t0) / 1000).toFixed(1)}s — cycle them with ‹ › in Layers.`);
   } catch (err) {
-    rmgStatus(
-      err.message.includes('fetch')
-        ? 'Service not running — start genai-service/server.py first.'
-        : `Error: ${err.message}`, 'error');
+    genStatus(await genFailureMessage(err), 'error');
   } finally {
+    stopProgress();
     btn.disabled = false;
   }
 }
@@ -2119,7 +2287,9 @@ function init() {
   buildToolbar();
   buildAdjustPanel();
   buildLayersPanel();
-  $('#gen-go').addEventListener('click', generativeFill);
+  $('#gen-go').addEventListener('click', dispatchGenerate);
+  $('#mode-fill').addEventListener('click', () => setGenMode('fill'));
+  $('#mode-rmg').addEventListener('click', () => setGenMode('rmg'));
   $('#gen-expand-apply').addEventListener('click', () => {
     $('#sel-expand').value = 5;
     $('#sel-expand-val').textContent = '5px';
@@ -2132,13 +2302,8 @@ function init() {
     hideExpandTip();
     generativeFill();
   });
-  $('#rmg-go').addEventListener('click', reimagine);
   $('#rmg-likeness').addEventListener('input', (e) => {
     $('#rmg-likeness-val').textContent = e.target.value;
-  });
-  $('#rmg-prompt').addEventListener('keydown', (e) => {
-    e.stopPropagation();
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); reimagine(); }
   });
   setupPanels();
   $('#vary-prev').addEventListener('click', () => setLayerVariation(activeLayer(), activeLayer().variationIndex - 1));
@@ -2161,10 +2326,13 @@ function init() {
   $('#sel-none').addEventListener('click', deselect);
   $('#gen-prompt').addEventListener('keydown', (e) => {
     e.stopPropagation();   // don't trigger tool shortcuts while typing
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); generativeFill(); }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); dispatchGenerate(); }
   });
+  setGenMode(genMode);
   setTool('brush');
   window.addEventListener('resize', () => applyStageTransform());
+  $('#gen-model').addEventListener('click', toggleModelMenu);
+  showModelBadge();
 
   // Restore the previous session if one was autosaved; otherwise show the demo.
   restoreSession().then((restored) => {
